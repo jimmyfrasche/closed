@@ -5,8 +5,8 @@ import (
 	"sort"
 )
 
-//split into interfaces and non-interfaces.
-func split(ts []*types.TypeName) (abstract, concrete []*types.TypeName) {
+//interfacesAndConcrete into interfaces and non-interfaces.
+func interfacesAndConcrete(ts []*types.TypeName) (abstract, concrete []*types.TypeName) {
 	for _, t := range ts {
 		if types.IsInterface(t.Type()) {
 			abstract = append(abstract, t)
@@ -80,8 +80,7 @@ outer:
 			continue
 		}
 
-		//TODO need to confirm discriminant is a union with the same number of labels
-		//as NumFields()-1
+		//TODO need to confirm discriminant is a union
 		switch B.Kind() {
 		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64, types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64:
 			unions = append(unions, t)
@@ -90,6 +89,7 @@ outer:
 	return optionals, unions
 }
 
+//transClosureAliases finds all local aliases of t.
 func transClosureAliases(aliases map[string][]*types.TypeName, t *types.TypeName) []*types.TypeName {
 	acc := transClosureAliasesRec(aliases, t, nil)
 	//want to leave first element alone but keep rest in stable order
@@ -193,6 +193,17 @@ func findTagMethods(decls []decl, sum *types.TypeName, members []typeOrPtr) meth
 	return cands
 }
 
+//pkgTagMethods formats a method set as a sorted []string of method names.
+func pkgTagMethods(tags methodSet) []string {
+	tagNames := make([]string, 0, len(tags))
+	for nm := range tags {
+		tagNames = append(tagNames, nm.nm)
+	}
+	sort.Strings(tagNames)
+	return tagNames
+}
+
+//anyExported names in ts.
 func anyExported(ts []*types.TypeName) bool {
 	for _, t := range ts {
 		if t.Exported() {
@@ -209,8 +220,7 @@ func zeroSized(t types.Type) bool {
 	return sizer.Sizeof(t) == 0
 }
 
-//TODO break this up into more functions, fairly unreadable
-
+//pkgIfaces packages interfaces into Interface and InterfaceSum.
 func pkgIfaces(aliases map[string][]*types.TypeName, decls []decl, ifaces map[*types.TypeName][]typeOrPtr) []Type {
 	acc := make([]Type, 0, len(ifaces))
 	for t, ms := range ifaces {
@@ -218,86 +228,110 @@ func pkgIfaces(aliases map[string][]*types.TypeName, decls []decl, ifaces map[*t
 
 		tags := findTagMethods(decls, t, ms)
 		if len(tags) == 0 {
-			typs := make([]*TypeNamesAndType, len(ms))
-			for i, m := range ms {
-				typs[i] = &TypeNamesAndType{
-					TypeName: transClosureAliases(aliases, m.TypeName),
-					Type:     m.Type(),
-				}
-			}
-			acc = append(acc, &Interface{
-				typs:    names,
-				Members: typs,
-			})
+			acc = append(acc, pkgClosedInterface(aliases, names, t, ms))
 		} else {
-			tagNames := make([]string, 0, len(tags))
-			for nm := range tags {
-				tagNames = append(tagNames, nm.nm)
-			}
-			sort.Strings(tagNames)
-
-			checkFalse := anyExported(names) && len(methodSetsOf(t).T) == len(tags)
-			var embeddings map[*types.TypeName][]types.Type
-			computeEmbeddings := func() {
-				if embeddings != nil {
-					return
-				}
-
-				embeddings = map[*types.TypeName][]types.Type{}
-				for _, m := range ms {
-					T := m.TypeName
-					s, ok := T.Type().(*types.Struct)
-					if !ok || zeroSized(s) {
-						continue
-					}
-					for i := 0; i < s.NumFields(); i++ {
-						f := s.Field(i)
-						if !f.Anonymous() {
-							continue
-						}
-						embeddings[T] = append(embeddings[T], f.Type())
-					}
-				}
-			}
-
-			typs := make([]*TypeNamesAndType, 0, len(ms))
-			var falseTyps []*TypeNamesAndType
-
-			for _, m := range ms {
-				T := &TypeNamesAndType{
-					TypeName: transClosureAliases(aliases, m.TypeName),
-					Type:     m.Type(),
-				}
-				isFalseMember := false
-				if checkFalse && zeroSized(T.TypeName[0].Type()) && !anyExported(T.TypeName) {
-					methods := methodSetsOf(m.TypeName)
-					if lt := len(tags); len(methods.T) == lt || len(methods.ptrT) == lt {
-						computeEmbeddings()
-					outer:
-						for _, ets := range embeddings {
-							for _, ef := range ets {
-								if types.Identical(T.Type, ef) {
-									isFalseMember = true
-									break outer
-								}
-							}
-						}
-					}
-				}
-				if isFalseMember {
-					falseTyps = append(falseTyps, T)
-				} else {
-					typs = append(typs, T)
-				}
-			}
-
-			acc = append(acc, &InterfaceSum{
-				typs:         names,
-				Members:      typs,
-				FalseMembers: falseTyps,
-				TagMethods:   tagNames,
-			})
+			acc = append(acc, pkgInterfaceSum(aliases, names, t, ms, tags))
 		}
 	}
 	return acc
+}
+
+func pkgM(aliases map[string][]*types.TypeName, m typeOrPtr) *TypeNamesAndType {
+	return &TypeNamesAndType{
+		TypeName: transClosureAliases(aliases, m.TypeName),
+		Type:     m.Type(),
+	}
+}
+
+func pkgClosedInterface(aliases map[string][]*types.TypeName, names []*types.TypeName, t *types.TypeName, ms []typeOrPtr) *Interface {
+	typs := make([]*TypeNamesAndType, len(ms))
+	for i, m := range ms {
+		typs[i] = pkgM(aliases, m)
+	}
+	return &Interface{
+		typs:    names,
+		Members: typs,
+	}
+}
+
+func pkgInterfaceSum(aliases map[string][]*types.TypeName, names []*types.TypeName, t *types.TypeName, ms []typeOrPtr, tags methodSet) *InterfaceSum {
+	real, fake := splitIfaceSumMethods(aliases, names, t, ms, tags)
+	tagNames := pkgTagMethods(tags)
+	return &InterfaceSum{
+		typs:         names,
+		Members:      real,
+		FalseMembers: fake,
+		TagMethods:   tagNames,
+	}
+}
+
+func splitIfaceSumMethods(aliases map[string][]*types.TypeName, names []*types.TypeName, t *types.TypeName, ms []typeOrPtr, tags methodSet) (real, fake []*TypeNamesAndType) {
+	checkFalse := mustCheckForFalseMembers(names, t, tags)
+	var embeddings map[*types.TypeName][]types.Type
+
+	typs := make([]*TypeNamesAndType, 0, len(ms))
+	var falseTyps []*TypeNamesAndType
+
+	for _, m := range ms {
+		T := pkgM(aliases, m)
+
+		if checkFalse && maybeFalse(T, tags) && isEmbedded(embeddings, T, ms) {
+			falseTyps = append(falseTyps, T)
+		} else {
+			typs = append(typs, T)
+		}
+	}
+	return typs, falseTyps
+}
+
+func mustCheckForFalseMembers(names []*types.TypeName, t *types.TypeName, tags methodSet) bool {
+	return anyExported(names) && len(methodSetsOf(t).T) == len(tags)
+}
+
+func maybeFalse(T *TypeNamesAndType, tags methodSet) bool {
+	if zeroSized(T.TypeName[0].Type()) && !anyExported(T.TypeName) {
+		methods := methodSetsOf(T.TypeName[0])
+		if lt := len(tags); len(methods.T) == lt || len(methods.ptrT) == lt {
+			return true
+		}
+	}
+	return false
+}
+
+func lazyComputeEmbeddingsOfMembers(em map[*types.TypeName][]types.Type, ms []typeOrPtr) map[*types.TypeName][]types.Type {
+	//len(em) == 0 means we computed and found nothing
+	if em != nil {
+		return em
+	}
+
+	for _, m := range ms {
+		T := m.TypeName
+
+		s, ok := T.Type().(*types.Struct)
+		if !ok || zeroSized(s) {
+			continue
+		}
+
+		for i := 0; i < s.NumFields(); i++ {
+			f := s.Field(i)
+			if !f.Anonymous() {
+				continue
+			}
+			em[T] = append(em[T], f.Type())
+		}
+	}
+
+	return em
+}
+
+func isEmbedded(ems map[*types.TypeName][]types.Type, t *TypeNamesAndType, ms []typeOrPtr) bool {
+	ems = lazyComputeEmbeddingsOfMembers(ems, ms)
+	for _, ets := range ems {
+		for _, ef := range ets {
+			if types.Identical(t.Type, ef) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -33,22 +33,21 @@ func InPackage(fs *token.FileSet, files []*ast.File, pkg *types.Package) ([]Type
 
 	out := pkgEnums(fs, aliases, enums)
 
-	abstract, concrete := split(regTypes)
+	abstract, concrete := interfacesAndConcrete(regTypes)
 
 	potOpts, _ := potentiallyClosedStructs(concrete)
 
 	if pkg.Path() == "database/sql" {
 		out = append(out, stdDatabaseSql(potOpts)...)
-	}
+	} //TODO define and parse comment
 
 	empties, closed := binInterfaces(abstract)
 
 	if pkg.Path() == "encoding/xml" {
 		out = append(out, stdEncodingXml(empties, pkg.Scope())...)
-	}
-	if pkg.Path() == "encoding/json" {
+	} else if pkg.Path() == "encoding/json" {
 		out = append(out, stdEncodingJson(empties, pkg.Scope())...)
-	}
+	} //TODO define and parse comment
 
 	sats := satisfiers(closed, concrete)
 
