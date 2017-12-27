@@ -10,81 +10,61 @@ import (
 	"sort"
 )
 
-//TODO returns bitsets as well, we can do analysis on them and they're closed
+func grabEnums(fs *token.FileSet, decls map[string]*ast.ValueSpec, consts []*types.Const) (enums, bitsets map[*types.TypeName][]*constants, err error) {
+	intvec, restvec := binConstants(filterConstants(consts))
 
-func grabEnums(fs *token.FileSet, decls map[string]*ast.ValueSpec, consts []*types.Const) (map[*types.TypeName][]*constants, error) {
-	consts = filterConstants(consts)
-
-	intvec, uintvec, restvec := binConstants(consts)
-
-	out := map[*types.TypeName][]*constants{}
-	add := func(t *types.TypeName, cs []*constants) {
-		//types with one label are often sentinels
-		if len(cs) > 1 {
-			out[t] = cs
-		}
-	}
+	enums = map[*types.TypeName][]*constants{}
 
 	//nonintegral types are always enums, by our definition
-	restGroup := groupConstants(restvec)
-	for t, cs := range restGroup {
-		add(t, groupLabels(cs))
+	for t, cs := range groupConstants(restvec) {
+		enums[t] = groupLabels(cs)
 	}
-	restGroup = nil
 
-	//filter out ints and uints that definitely bitsets by their defining expressions
-
-	intGroup, err := integralConsts(fs, decls, intvec)
+	ints, intbits, err := integralConsts(fs, decls, intvec)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	possibleBitsets, err := integralConsts(fs, decls, uintvec)
-	if err != nil {
-		return nil, err
-	}
-
-	//integers that are all positive may still be bitsets
-	//but types with negative values are unlikely to be.
-	for t, cs := range intGroup {
-		if allPositive(cs) {
-			possibleBitsets[t] = cs
-		} else {
-			add(t, groupLabels(cs))
+	for t, cs := range ints {
+		//int enum with one member usually a sentinel
+		if len(cs) > 1 {
+			enums[t] = groupLabels(cs)
 		}
 	}
-	intGroup = nil
+	ints = nil
 
-	//Then for uintgroups we can do the value based test and merge all passes into out
-	for t, cs := range possibleBitsets {
-		consts := groupLabels(cs)
-		if !hasBitsetValues(consts) {
-			add(t, consts)
+	bitsets = map[*types.TypeName][]*constants{}
+	for t, cs := range intbits {
+		labels := groupLabels(cs)
+		if len(labels) == 1 || !hasBitsetValues(labels) {
+			continue
 		}
+		bitsets[t] = labels
 	}
-	possibleBitsets = nil
 
-	return out, nil
+	return enums, bitsets, nil
 }
 
-func integralConsts(fs *token.FileSet, decls map[string]*ast.ValueSpec, consts []*types.Const) (map[*types.TypeName][]*types.Const, error) {
+func integralConsts(fs *token.FileSet, decls map[string]*ast.ValueSpec, consts []*types.Const) (enums, bitsets map[*types.TypeName][]*types.Const, err error) {
 	specs, err := specsOfConsts(decls, consts)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	groups := groupConstants(consts)
+	bitsets = map[*types.TypeName][]*types.Const{}
 	for t, cs := range groups {
 		ok, err := allValidExprs(fs, specs, cs)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !ok {
+			bitsets[t] = cs
 			delete(groups, t)
 		}
 	}
 
-	return groups, nil
+	return groups, bitsets, nil
 }
 
 //filerConstants that are of a named type defined in the same package.
@@ -101,14 +81,12 @@ func filterConstants(consts []*types.Const) []*types.Const {
 }
 
 //binConstants into signed ints, unsigned ints, and the rest.
-func binConstants(consts []*types.Const) (ints, uints, rest []*types.Const) {
+func binConstants(consts []*types.Const) (ints, rest []*types.Const) {
 	for _, c := range consts {
 		k := c.Type().Underlying().(*types.Basic).Kind()
 		switch k {
-		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64:
+		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64, types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64:
 			ints = append(ints, c)
-		case types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64:
-			uints = append(uints, c)
 		default:
 			rest = append(rest, c)
 		}
@@ -177,6 +155,8 @@ func specsOfConsts(nms map[string]*ast.ValueSpec, consts []*types.Const) (map[*t
 	return m, nil
 }
 
+//TODO really need to replace this with finding a decl like 1 << iota
+
 //allValidExprs uses spec to determine if consts (all of one type) only contains legal enum expressions.
 func allValidExprs(fs *token.FileSet, spec map[*types.Const]*ast.ValueSpec, consts []*types.Const) (ok bool, err error) {
 	defer func() {
@@ -208,8 +188,6 @@ func allValidExprs(fs *token.FileSet, spec map[*types.Const]*ast.ValueSpec, cons
 		if !validExpr(expr) {
 			return false, nil
 		}
-
-		//
 	}
 
 	return true, nil
@@ -277,7 +255,11 @@ func hasBitsetValues(lbls []*constants) bool {
 	}
 
 	//too few unibit values to make decision confidently
-	if unibit < 3 {
+	if unibit < 2 {
+		return false
+	}
+
+	if len(multibit) > unibit/2 {
 		return false
 	}
 
@@ -291,6 +273,18 @@ func hasBitsetValues(lbls []*constants) bool {
 	return true
 }
 
+func sortLabels(fs *token.FileSet, labels []*types.Const) {
+	sort.Slice(labels, func(i, j int) bool {
+		a, b := labels[i], labels[j]
+		//if they're defined in different files, first sort by file name
+		if fs.File(a.Pos()).Name() < fs.File(b.Pos()).Name() {
+			return true
+		}
+		//otherwise rely on monotinicity of positions
+		return a.Pos() < b.Pos()
+	})
+}
+
 func pkgEnums(fs *token.FileSet, aliases map[string][]*types.TypeName, enums map[*types.TypeName][]*constants) []Type {
 	acc := make([]Type, 0, len(enums))
 	for t, cs := range enums {
@@ -298,22 +292,39 @@ func pkgEnums(fs *token.FileSet, aliases map[string][]*types.TypeName, enums map
 
 		lbls := make([][]*types.Const, len(cs))
 		for i, c := range cs {
-			sort.Slice(c.labels, func(i, j int) bool {
-				a, b := c.labels[i], c.labels[j]
-				//if they're defined in different files, first sort by file name
-				if fs.File(a.Pos()).Name() < fs.File(b.Pos()).Name() {
-					return true
-				}
-				//otherwise rely on monotinicity of positions
-				return a.Pos() < b.Pos()
-			})
-
+			sortLabels(fs, c.labels)
 			lbls[i] = c.labels
 		}
 
 		acc = append(acc, &Enum{
 			typs:   names,
 			Labels: lbls,
+		})
+	}
+	return acc
+}
+
+func pkgBitsets(fs *token.FileSet, aliases map[string][]*types.TypeName, bitsets map[*types.TypeName][]*constants) []Type {
+	acc := make([]Type, 0, len(bitsets))
+	for t, cs := range bitsets {
+		names := transClosureAliases(aliases, t)
+
+		var flag, multibit [][]*types.Const
+		for _, c := range cs {
+			sortLabels(fs, c.labels)
+
+			u, _ := constant.Uint64Val(c.val)
+			if bits.OnesCount64(u) == 1 {
+				flag = append(flag, c.labels)
+			} else {
+				multibit = append(multibit, c.labels)
+			}
+		}
+
+		acc = append(acc, &Bitset{
+			typs:    names,
+			Flags:   flag,
+			OrFlags: multibit,
 		})
 	}
 	return acc

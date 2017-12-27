@@ -29,6 +29,7 @@ type Enum struct {
 	//		A Enum = iota
 	//		B
 	//		C = B
+	//	)
 	//there would be two Labels.
 	//The first would just be A and the second would be B and C.
 	Labels [][]*types.Const
@@ -36,6 +37,20 @@ type Enum struct {
 
 func (e *Enum) Types() []*types.TypeName {
 	return e.typs
+}
+
+//A Bitset.
+type Bitset struct {
+	isType
+	typs []*types.TypeName
+	//Flags are the single bit labels in this Bitset.
+	Flags [][]*types.Const
+	//OrFlags are any multibit convienence labels.
+	OrFlags [][]*types.Const
+}
+
+func (b *Bitset) Types() []*types.TypeName {
+	return b.typs
 }
 
 //TypeNamesAndType records the TypeName of a defined type (always TypeName[0])

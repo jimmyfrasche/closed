@@ -26,12 +26,14 @@ func InPackage(fs *token.FileSet, files []*ast.File, pkg *types.Package) ([]Type
 	consts, allTypes := extract(pkg.Scope())
 	aliases, regTypes := findAliasesAndRegular(allTypes)
 
-	enums, err := grabEnums(fs, constDecls, consts)
+	enums, bitsets, err := grabEnums(fs, constDecls, consts)
 	if err != nil {
 		return nil, err
 	}
 
 	out := pkgEnums(fs, aliases, enums)
+
+	out = append(out, pkgBitsets(fs, aliases, bitsets)...)
 
 	abstract, concrete := interfacesAndConcrete(regTypes)
 

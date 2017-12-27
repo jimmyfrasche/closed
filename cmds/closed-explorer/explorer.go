@@ -68,25 +68,33 @@ func main() {
 	for _, v := range vs {
 		switch v := v.(type) {
 		case *closed.Enum:
-			fmt.Println("Enum:", v.Types()[0].Name())
+			fmt.Println("Enum:", name(v))
 			for _, lbl := range v.Labels {
-				var nms []string
-				for _, c := range lbl {
-					nms = append(nms, c.Name())
+				fmt.Printf("\t%s\n", labels(lbl))
+			}
+			fmt.Println()
+		case *closed.Bitset:
+			fmt.Println("Bitset:", name(v))
+			for _, f := range v.Flags {
+				fmt.Printf("\t%s\n", labels(f))
+			}
+			if len(v.OrFlags) > 1 {
+				fmt.Println("\t| flags")
+				for _, f := range v.OrFlags {
+					fmt.Printf("\t\t%s\n", labels(f))
 				}
-				fmt.Printf("\t%s\n", strings.Join(nms, " = "))
 			}
 			fmt.Println()
 
 		case *closed.Interface:
-			fmt.Println("Closed iface:", v.Types()[0].Name())
+			fmt.Println("Closed iface:", name(v))
 			for _, m := range v.Members {
-				fmt.Printf("\t%s\n", names(m))
+				fmt.Printf("\t%s\n", typeNames(m))
 			}
 			fmt.Println()
 
 		case *closed.InterfaceSum:
-			fmt.Println("Sum iface:", v.Types()[0].Name())
+			fmt.Println("Sum iface:", name(v))
 			fmt.Println("\ttags methods:")
 			for _, t := range v.TagMethods {
 				fmt.Printf("\t\t%s\n", t)
@@ -94,17 +102,17 @@ func main() {
 			if len(v.FalseMembers) > 0 {
 				fmt.Println("\tfalse members:")
 				for _, m := range v.FalseMembers {
-					fmt.Printf("\t\t%s\n", names(m))
+					fmt.Printf("\t\t%s\n", typeNames(m))
 				}
 			}
 			fmt.Println("\tmembers:")
 			for _, m := range v.Members {
-				fmt.Printf("\t\t%s\n", names(m))
+				fmt.Printf("\t\t%s\n", typeNames(m))
 			}
 			fmt.Println()
 
 		case *closed.EmptySum:
-			fmt.Println("Empty sum:", v.Types()[0].Name())
+			fmt.Println("Empty sum:", name(v))
 			if v.Nil {
 				fmt.Println("\t<nil>")
 			}
@@ -113,7 +121,7 @@ func main() {
 			}
 
 		case *closed.OptionalStruct:
-			fmt.Println("Optional struct:", v.Types()[0].Name())
+			fmt.Println("Optional struct:", name(v))
 			fmt.Printf("\tDiscriminant: %s\n", v.Discriminant.Name())
 			fmt.Printf("\tOptional: %s\n", v.Field.Name())
 			fmt.Println()
@@ -124,7 +132,19 @@ func main() {
 	}
 }
 
-func names(t *closed.TypeNamesAndType) string {
+func name(t closed.Type) string {
+	return t.Types()[0].Name()
+}
+
+func labels(lbl []*types.Const) string {
+	var nms []string
+	for _, c := range lbl {
+		nms = append(nms, c.Name())
+	}
+	return strings.Join(nms, " = ")
+}
+
+func typeNames(t *closed.TypeNamesAndType) string {
 	prefix := ""
 	if _, ptr := t.Type.Underlying().(*types.Pointer); ptr {
 		prefix = "*"
