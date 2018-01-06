@@ -254,10 +254,10 @@ func pkgClosedInterface(aliases map[string][]*types.TypeName, names []*types.Typ
 	}
 }
 
-func pkgInterfaceSum(aliases map[string][]*types.TypeName, names []*types.TypeName, t *types.TypeName, ms []typeOrPtr, tags methodSet) *InterfaceSum {
+func pkgInterfaceSum(aliases map[string][]*types.TypeName, names []*types.TypeName, t *types.TypeName, ms []typeOrPtr, tags methodSet) *Interface {
 	real, fake := splitIfaceSumMethods(aliases, names, t, ms, tags)
 	tagNames := pkgTagMethods(tags)
-	return &InterfaceSum{
+	return &Interface{
 		typs:         names,
 		Members:      real,
 		FalseMembers: fake,

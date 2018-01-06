@@ -11,9 +11,15 @@ import (
 )
 
 func grabEnums(fs *token.FileSet, decls map[string]*ast.ValueSpec, consts []*types.Const) (enums, bitsets map[*types.TypeName][]*constants, err error) {
-	intvec, restvec := binConstants(filterConstants(consts))
+	intvec, bools, restvec := binConstants(filterConstants(consts))
 
 	enums = map[*types.TypeName][]*constants{}
+
+	//bool constants are always enums, but have to be treated separately as the rest
+	//depends on < being defined on the type
+	for t, cs := range groupConstants(bools) {
+		enums[t] = groupBool(cs)
+	}
 
 	//nonintegral types are always enums, by our definition
 	for t, cs := range groupConstants(restvec) {
@@ -81,12 +87,14 @@ func filterConstants(consts []*types.Const) []*types.Const {
 }
 
 //binConstants into signed ints, unsigned ints, and the rest.
-func binConstants(consts []*types.Const) (ints, rest []*types.Const) {
+func binConstants(consts []*types.Const) (ints, bools, rest []*types.Const) {
 	for _, c := range consts {
 		k := c.Type().Underlying().(*types.Basic).Kind()
 		switch k {
 		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64, types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64:
 			ints = append(ints, c)
+		case types.Bool:
+			bools = append(bools, c)
 		default:
 			rest = append(rest, c)
 		}
@@ -107,6 +115,29 @@ func groupConstants(consts []*types.Const) map[*types.TypeName][]*types.Const {
 type constants struct {
 	val    constant.Value
 	labels []*types.Const
+}
+
+func groupBool(consts []*types.Const) []*constants {
+	if len(consts) == 0 {
+		return nil
+	}
+
+	var t, f []*types.Const
+	T := constant.MakeBool(true)
+	F := constant.MakeBool(false)
+
+	for _, c := range consts {
+		if constant.Compare(c.Val(), token.EQL, T) {
+			t = append(t, c)
+		} else {
+			f = append(f, c)
+		}
+	}
+
+	return []*constants{
+		{val: F, labels: f},
+		{val: T, labels: t},
+	}
 }
 
 //groupLabels of a vector of constants of homogeneous type.

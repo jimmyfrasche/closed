@@ -21,6 +21,10 @@ func (isType) closed() {}
 type Enum struct {
 	isType
 	typs []*types.TypeName
+	//NonZero is true if there is an explicit comment directive forbidding
+	//zero from being a valid value.
+	//It is meaningless if there is a label for the zero value.
+	NonZero bool
 	//Labels are the valid members of the enumeration.
 	//If len(Labels[i]) > 1, then Labels[i][1:] are synonyms.
 	//For example, given
@@ -64,25 +68,17 @@ type TypeNamesAndType struct {
 	Type     types.Type
 }
 
-//An Interface is an interface with at least one unexported method.
-//It may or may not be a sum type.
-//It may or may not be a closed type, but likely is.
+//An Interface is an interface with at least one exported method.
+//If it follows the conventional means of marking a sum type
+//by an empty, nullary, unexported method tag, that will be recorded
+//in TagMethods.
+//If not it may not be a sum type or a closed type, but likely is.
 type Interface struct {
 	isType
 	typs []*types.TypeName
-	//Members are the types defined in the same package that satisfy this interface.
-	Members []*TypeNamesAndType
-}
-
-func (i *Interface) Types() []*types.TypeName {
-	return i.typs
-}
-
-//An InterfaceSum follows the conventional means of marking a sum type
-//by an empty, nullary, unexported method tag.
-type InterfaceSum struct {
-	isType
-	typs []*types.TypeName
+	//NonNil is true if there is a comment directive marked this
+	//type as not being able to contain nil.
+	NonNil bool
 	//Members are the types in the sum.
 	Members []*TypeNamesAndType
 	//FalseMembers are unexported zero-sized types with the appropriate tag
@@ -92,7 +88,7 @@ type InterfaceSum struct {
 	TagMethods []string
 }
 
-func (i *InterfaceSum) Types() []*types.TypeName {
+func (i *Interface) Types() []*types.TypeName {
 	return i.typs
 }
 
