@@ -301,3 +301,15 @@ func importsOf(imp func(pkger), t types.Type) {
 		imp(t.Obj())
 	}
 }
+
+//Find t in vs or return nil.
+func Find(t *types.TypeName, vs []closed.Type) closed.Type {
+	for _, v := range vs {
+		for _, n := range v.Types() {
+			if t == n {
+				return v
+			}
+		}
+	}
+	return nil
+}

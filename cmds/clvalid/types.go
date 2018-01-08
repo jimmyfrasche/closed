@@ -77,24 +77,12 @@ func LoadType(importPath, typeName string) (*Type, error) {
 		return nil, err
 	}
 
-	T.T = find(typ, ts)
+	T.T = closedutil.Find(typ, ts)
 	if T.T == nil {
 		return nil, fmt.Errorf("%s is not recognized as a closed type", T.Name)
 	}
 
 	return T, nil
-}
-
-//find t in vs.
-func find(t *types.TypeName, vs []closed.Type) closed.Type {
-	for _, v := range vs {
-		for _, n := range v.Types() {
-			if t == n {
-				return v
-			}
-		}
-	}
-	return nil
 }
 
 //mustFunc returns true if c does not allow methods.
