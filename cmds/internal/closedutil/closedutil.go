@@ -208,6 +208,21 @@ func FirstExportedTypeName(ts []*types.TypeName) *types.TypeName {
 	return nil
 }
 
+//FirstExportedType returns a Type correponding to FirstExportedTypeName
+//which is a pointer if t.Type is a pointer.
+func FirstExportedType(t *closed.TypeNamesAndType) types.Type {
+	T := FirstExportedTypeName(t.TypeName)
+	if T == nil {
+		return nil
+	}
+	nm := T.Type()
+	_, isPtr := t.Type.(*types.Pointer)
+	if isPtr {
+		return types.NewPointer(nm)
+	}
+	return nm
+}
+
 //AllMask returns a mask with every bit in b.Flags set.
 func AllMask(b *closed.Bitset) uint64 {
 	var all uint64
