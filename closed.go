@@ -49,7 +49,7 @@ func InPackage(fs *token.FileSet, files []*ast.File, pkg *types.Package) ([]Type
 		out = append(out, stdEncodingXml(empties, pkg.Scope())...)
 	} else if pkg.Path() == "encoding/json" {
 		out = append(out, stdEncodingJson(empties, pkg.Scope())...)
-	} //TODO define and parse comment
+	} //TODO define and parse comment - NB, have to enforce types in empty be imported into pkg
 
 	sats := satisfiers(closed, concrete)
 
